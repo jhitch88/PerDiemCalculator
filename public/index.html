@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="mainstyle.css">
+    <title>Per Diem Calculator</title>
+</head>
+<body>
+    <div class="header">
+        <h1>Per Diem Calculator</h1>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <div class="container">
+        <div class="summary-cards">
+            <div class="summary-card">
+                <h3 id="lodgingTotal">$0.00</h3>
+                <p>Total Lodging</p>
+            </div>
+            <div class="summary-card">
+                <h3 id="foodTotal">$0.00</h3>
+                <p>Total Food</p>
+            </div>
+            <div class="summary-card">
+                <h3 id="grandTotal">$0.00</h3>
+                <p>Grand Total</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">Add Expense</h2>
+            
+            <form id="expenseForm">
+                <div class="form-group expense-type-select">
+                    <label for="expenseType">Expense Type:</label>
+                    <select id="expenseType" required>
+                        <option value="">Select Type</option>
+                        <option value="lodging">Lodging</option>
+                        <option value="food">Food</option>
+                    </select>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="date">Date:</label>
+                        <input type="date" id="date" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="establishment">Establishment:</label>
+                        <input type="text" id="establishment" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="receiptAmount">Receipt Amount:</label>
+                        <input type="number" id="receiptAmount" step="0.01" required>
+                    </div>
+                    
+                    <div class="form-group city-suggestions">
+                        <label for="city">City:</label>
+                        <input type="text" id="city" required autocomplete="off" placeholder="Enter city name or zip code">
+                        <div class="suggestions-dropdown" id="citySuggestions"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="state">State (2-letter code):</label>
+                        <input type="text" id="state" maxlength="2" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="zipCode">Zip Code (optional for more accuracy):</label>
+                        <input type="text" id="zipCode" maxlength="5" placeholder="5-digit zip code">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="perDiemAmount">Per Diem Amount:</label>
+                        <input type="number" id="perDiemAmount" step="0.01" readonly>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="note">Note:</label>
+                    <input type="text" id="note" placeholder="Optional note">
+                </div>
+
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" onclick="getPerDiem()">Get Per Diem Rate</button>
+                    <button type="submit" class="btn btn-primary">Add Expense</button>
+                    <button type="button" class="btn btn-success" onclick="exportData()">Export to CSV</button>
+                    <button type="button" class="btn btn-danger" onclick="clearAll()">Clear All</button>
+                </div>
+            </form>
+
+            <div class="loading" id="loading">Loading per diem rates...</div>
+            <div class="error" id="error"></div>
+            <div class="success" id="success"></div>
+        </div>
+
+        <div class="card">
+            <h2 class="section-title">Expenses</h2>
+            
+            <div class="table-container">
+                <table id="expenseTable">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Date</th>
+                            <th>Establishment</th>
+                            <th>Receipt Amount</th>
+                            <th>Per Diem Amount</th>
+                            <th>Location</th>
+                            <th>Note</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expenseTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let expenses = JSON.parse(localStorage.getItem('expenses')) || [];
+
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Check authentication status
+            try {
+                const authCheck = await fetch('/api/auth-check');
+                if (!authCheck.ok) {
+                    window.location.href = '/login';
+                    return;
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                window.location.href = '/login';
+                return;
+            }
+            
+            renderExpenses();
+            updateTotals();
+            
+            // Set today's date as default
+            document.getElementById('date').valueAsDate = new Date();
+        });
+
+        // City search functionality
+        let citySearchTimeout;
+        document.getElementById('city').addEventListener('input', function() {
+            const query = this.value.trim();
+            const state = document.getElementById('state').value.trim();
+            
+            clearTimeout(citySearchTimeout);
+            
+            if (query.length >= 2) {
+                citySearchTimeout = setTimeout(() => {
+                    searchCities(query, state);
+                }, 300);
+            } else {
+                hideCitySuggestions();
+            }
+        });
+
+        async function searchCities(query, state) {
+            try {
+                const response = await fetch(`/api/search-cities?query=${encodeURIComponent(query)}&state=${encodeURIComponent(state)}`);
+                
+                // Check if response is actually JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('Server returned non-JSON response, possibly authentication issue');
+                    hideCitySuggestions();
+                    return;
+                }
+                
+                if (!response.ok) {
+                    if (response.status === 401 || response.status === 403) {
+                        // Authentication issue - redirect to login
+                        window.location.href = '/login';
+                        return;
+                    }
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                showCitySuggestions(data.cities || []);
+            } catch (error) {
+                console.error('City search error:', error);
+                hideCitySuggestions();
+            }
+        }
+
+        function showCitySuggestions(cities) {
+            const dropdown = document.getElementById('citySuggestions');
+            dropdown.innerHTML = '';
+            
+            if (cities.length === 0) {
+                hideCitySuggestions();
+                return;
+            }
+            
+            cities.forEach(city => {
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                
+                // Create detailed display
+                const mainText = `${city.city}, ${city.state}`;
+                const subText = city.zipCode ? `ZIP: ${city.zipCode}` : 'No ZIP found';
+                const countyText = city.county ? ` • ${city.county}` : '';
+                
+                item.innerHTML = `
+                    <div style="font-weight: 500;">${mainText}</div>
+                    <div style="font-size: 0.8rem; color: #666;">${subText}${countyText}</div>
+                `;
+                
+                item.onclick = () => {
+                    document.getElementById('city').value = city.city;
+                    document.getElementById('state').value = city.state;
+                    if (city.zipCode) {
+                        document.getElementById('zipCode').value = city.zipCode;
+                    }
+                    hideCitySuggestions();
+                };
+                dropdown.appendChild(item);
+            });
+            
+            dropdown.style.display = 'block';
+        }
+
+        function hideCitySuggestions() {
+            document.getElementById('citySuggestions').style.display = 'none';
+        }
+
+        // Close suggestions when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.city-suggestions')) {
+                hideCitySuggestions();
+            }
+        });
+
+        async function getPerDiem() {
+            const city = document.getElementById('city').value.trim();
+            const state = document.getElementById('state').value.trim().toUpperCase();
+            const date = document.getElementById('date').value;
+            const zipCode = document.getElementById('zipCode').value.trim();
+            
+            if (!city || !state || !date) {
+                showError('Please enter city, state, and date');
+                return;
+            }
+            
+            if (state.length !== 2) {
+                showError('Please enter a valid 2-letter state code');
+                return;
+            }
+            
+            showLoading(true);
+            hideMessages();
+            
+            try {
+                const requestBody = { city, state, date };
+                if (zipCode && /^\d{5}$/.test(zipCode)) {
+                    requestBody.zipCode = zipCode;
+                }
+                
+                const response = await fetch('/api/perdiem', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                // Check if response is actually JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    if (response.status === 401 || response.status === 403) {
+                        window.location.href = '/login';
+                        return;
+                    }
+                    throw new Error('Server returned non-JSON response');
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const expenseType = document.getElementById('expenseType').value;
+                    let perDiemAmount = 0;
+                    
+                    if (expenseType === 'lodging') {
+                        perDiemAmount = data.data.lodging;
+                    } else if (expenseType === 'food') {
+                        perDiemAmount = data.data.meals + data.data.incidentals;
+                    }
+                    
+                    document.getElementById('perDiemAmount').value = perDiemAmount.toFixed(2);
+                    
+                    // Show detailed success message
+                    let methodText = data.method === 'zipcode' ? `using ZIP code ${data.zipCode}` : 'using city name lookup';
+                    let locationText = data.data.county ? `${data.data.city}, ${data.data.county} County, ${data.data.state}` : `${data.data.city}, ${data.data.state}`;
+                    
+                    showSuccess(`Per diem rate found for ${locationText} (${methodText}): Lodging: $${data.data.lodging}, Meals & Incidentals: $${data.data.meals + data.data.incidentals}`);
+                } else {
+                    showError(data.error || 'Failed to get per diem rate');
+                }
+            } catch (error) {
+                showError('Failed to fetch per diem rate. Please try again.');
+                console.error('Error:', error);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        document.getElementById('expenseForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const expense = {
+                id: Date.now(),
+                type: document.getElementById('expenseType').value,
+                date: document.getElementById('date').value,
+                establishment: document.getElementById('establishment').value,
+                receiptAmount: parseFloat(document.getElementById('receiptAmount').value),
+                perDiemAmount: parseFloat(document.getElementById('perDiemAmount').value) || 0,
+                city: document.getElementById('city').value,
+                state: document.getElementById('state').value.toUpperCase(),
+                zipCode: document.getElementById('zipCode').value,
+                note: document.getElementById('note').value
+            };
+            
+            expenses.push(expense);
+            saveExpenses();
+            renderExpenses();
+            updateTotals();
+            
+            // Reset form
+            document.getElementById('expenseForm').reset();
+            document.getElementById('perDiemAmount').value = '';
+            document.getElementById('zipCode').value = '';
+            document.getElementById('date').valueAsDate = new Date();
+            
+            showSuccess('Expense added successfully!');
+        });
+
+        function renderExpenses() {
+            const tbody = document.getElementById('expenseTableBody');
+            tbody.innerHTML = '';
+            
+            // Group expenses by type
+            const lodgingExpenses = expenses.filter(e => e.type === 'lodging');
+            const foodExpenses = expenses.filter(e => e.type === 'food');
+            
+            // Render lodging expenses
+            if (lodgingExpenses.length > 0) {
+                const lodgingHeader = document.createElement('tr');
+                lodgingHeader.innerHTML = '<td colspan="8" style="background: #e9ecef; font-weight: bold; text-align: center;">LODGING</td>';
+                tbody.appendChild(lodgingHeader);
+                
+                lodgingExpenses.forEach(expense => {
+                    const row = createExpenseRow(expense);
+                    tbody.appendChild(row);
+                });
+            }
+            
+            // Render food expenses
+            if (foodExpenses.length > 0) {
+                const foodHeader = document.createElement('tr');
+                foodHeader.innerHTML = '<td colspan="8" style="background: #e9ecef; font-weight: bold; text-align: center;">FOOD</td>';
+                tbody.appendChild(foodHeader);
+                
+                foodExpenses.forEach(expense => {
+                    const row = createExpenseRow(expense);
+                    tbody.appendChild(row);
+                });
+            }
+            
+            // Add totals row
+            if (expenses.length > 0) {
+                const totalsRow = document.createElement('tr');
+                totalsRow.className = 'total-row';
+                const lodgingTotal = lodgingExpenses.reduce((sum, e) => sum + e.perDiemAmount, 0);
+                const foodTotal = foodExpenses.reduce((sum, e) => sum + e.perDiemAmount, 0);
+                const grandTotal = lodgingTotal + foodTotal;
+                
+                totalsRow.innerHTML = `
+                    <td colspan="3"><strong>TOTALS:</strong></td>
+                    <td class="amount"><strong>$${expenses.reduce((sum, e) => sum + e.receiptAmount, 0).toFixed(2)}</strong></td>
+                    <td class="amount"><strong>$${grandTotal.toFixed(2)}</strong></td>
+                    <td colspan="3"></td>
+                `;
+                tbody.appendChild(totalsRow);
+            }
+        }
+
+        function createExpenseRow(expense) {
+            const row = document.createElement('tr');
+            const formattedDate = new Date(expense.date).toLocaleDateString();
+            
+            row.innerHTML = `
+                <td>${expense.type.charAt(0).toUpperCase() + expense.type.slice(1)}</td>
+                <td>${formattedDate}</td>
+                <td>${expense.establishment}</td>
+                <td class="amount">$${expense.receiptAmount.toFixed(2)}</td>
+                <td class="amount">$${expense.perDiemAmount.toFixed(2)}</td>
+                <td>${expense.city}, ${expense.state}${expense.zipCode ? ` (${expense.zipCode})` : ''}</td>
+                <td>${expense.note || '-'}</td>
+                <td>
+                    <button class="btn btn-danger" onclick="deleteExpense(${expense.id})" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">Delete</button>
+                </td>
+            `;
+            
+            return row;
+        }
+
+        function deleteExpense(id) {
+            if (confirm('Are you sure you want to delete this expense?')) {
+                expenses = expenses.filter(e => e.id !== id);
+                saveExpenses();
+                renderExpenses();
+                updateTotals();
+                showSuccess('Expense deleted successfully!');
+            }
+        }
+
+        function updateTotals() {
+            const lodgingTotal = expenses
+                .filter(e => e.type === 'lodging')
+                .reduce((sum, e) => sum + e.perDiemAmount, 0);
+            
+            const foodTotal = expenses
+                .filter(e => e.type === 'food')
+                .reduce((sum, e) => sum + e.perDiemAmount, 0);
+            
+            const grandTotal = lodgingTotal + foodTotal;
+            
+            document.getElementById('lodgingTotal').textContent = `$${lodgingTotal.toFixed(2)}`;
+            document.getElementById('foodTotal').textContent = `$${foodTotal.toFixed(2)}`;
+            document.getElementById('grandTotal').textContent = `$${grandTotal.toFixed(2)}`;
+        }
+
+        function saveExpenses() {
+            localStorage.setItem('expenses', JSON.stringify(expenses));
+        }
+
+        function clearAll() {
+            if (confirm('Are you sure you want to clear all expenses? This cannot be undone.')) {
+                expenses = [];
+                saveExpenses();
+                renderExpenses();
+                updateTotals();
+                showSuccess('All expenses cleared!');
+            }
+        }
+
+        function exportData() {
+            if (expenses.length === 0) {
+                showError('No expenses to export');
+                return;
+            }
+            
+            let csv = 'Type,Date,Establishment,Receipt Amount,Per Diem Amount,City,State,Zip Code,Note\n';
+            
+            expenses.forEach(expense => {
+                const formattedDate = new Date(expense.date).toLocaleDateString();
+                csv += `"${expense.type}","${formattedDate}","${expense.establishment}","${expense.receiptAmount.toFixed(2)}","${expense.perDiemAmount.toFixed(2)}","${expense.city}","${expense.state}","${expense.zipCode || ''}","${expense.note || ''}"\n`;
+            });
+            
+            // Add totals
+            const lodgingTotal = expenses.filter(e => e.type === 'lodging').reduce((sum, e) => sum + e.perDiemAmount, 0);
+            const foodTotal = expenses.filter(e => e.type === 'food').reduce((sum, e) => sum + e.perDiemAmount, 0);
+            csv += `\n"TOTALS","","","${expenses.reduce((sum, e) => sum + e.receiptAmount, 0).toFixed(2)}","${(lodgingTotal + foodTotal).toFixed(2)}","","",""\n`;
+            csv += `"Lodging Total","","","","${lodgingTotal.toFixed(2)}","","",""\n`;
+            csv += `"Food Total","","","","${foodTotal.toFixed(2)}","","",""\n`;
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `per-diem-expenses-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            showSuccess('Data exported to CSV!');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            setTimeout(() => errorEl.style.display = 'none', 5000);
+        }
+
+        function showSuccess(message) {
+            const successEl = document.getElementById('success');
+            successEl.textContent = message;
+            successEl.style.display = 'block';
+            setTimeout(() => successEl.style.display = 'none', 3000);
+        }
+
+        function hideMessages() {
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('success').style.display = 'none';
+        }
+
+        async function logout() {
+            try {
+                await fetch('/logout', { method: 'POST' });
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('Logout error:', error);
+                window.location.href = '/login';
+            }
+        }
+    </script>
+</body>
+</html>
