@@ -4,7 +4,14 @@ build:
   commands:
     build:
       - echo "Build started on `date`"
-      - npm ci --only=production
+      - echo "Node version:"
+      - node --version
+      - echo "NPM version:"
+      - npm --version
+      - echo "Installing dependencies..."
+      - npm install --verbose
+      - echo "Listing installed packages..."
+      - npm list --depth=0
       - echo "Build completed on `date`"
 run:
   runtime-version: 22.14.0
