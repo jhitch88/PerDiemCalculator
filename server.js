@@ -55,8 +55,8 @@ async function getSecrets() {
         SESSION_SECRET = secrets.SESSION_SECRET;
         
         console.log('✅ Secrets loaded successfully from AWS Secrets Manager');
-        console.log(`✅ GSA_API_KEY loaded: ${GSA_API_KEY ? 'Yes' : 'No'}`);
-        console.log(`✅ LOGIN_USERNAME loaded: ${LOGIN_USERNAME ? 'Yes' : 'No'}`);
+        console.log(`✅ GSA_API_KEY loaded: ${GSA_API_KEY ? `${GSA_API_KEY.substring(0, 10)}...` : 'No'}`);
+        console.log(`✅ LOGIN_USERNAME loaded: ${LOGIN_USERNAME || 'No'}`);
         console.log(`✅ LOGIN_PASSWORD loaded: ${LOGIN_PASSWORD ? 'Yes' : 'No'}`);
         console.log(`✅ SESSION_SECRET loaded: ${SESSION_SECRET ? 'Yes' : 'No'}`);
         
@@ -100,7 +100,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Session configuration
-app.use(session({
+const sessionConfig = {
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
@@ -110,19 +110,36 @@ app.use(session({
         httpOnly: true,
         sameSite: NODE_ENV === 'production' ? 'strict' : 'lax'
     }
-}));
+};
+
+console.log(`[SESSION] Configuration:`, {
+    sessionSecretLength: SESSION_SECRET ? SESSION_SECRET.length : 0,
+    cookieSecure: sessionConfig.cookie.secure,
+    cookieSameSite: sessionConfig.cookie.sameSite,
+    environment: NODE_ENV
+});
+
+app.use(session(sessionConfig));
 
 // Authentication middleware
 const requireAuth = (req, res, next) => {
-    console.log('Auth check - Session:', req.session.authenticated, 'URL:', req.url);
-    if (req.session.authenticated) {
+    console.log(`[AUTH] ${new Date().toISOString()} - Auth check for ${req.method} ${req.url}`);
+    console.log(`[AUTH] Session ID: ${req.sessionID || 'undefined'}`);
+    console.log(`[AUTH] Session authenticated: ${req.session?.authenticated || 'undefined'}`);
+    console.log(`[AUTH] Session object:`, JSON.stringify(req.session, null, 2));
+    console.log(`[AUTH] Cookies:`, req.headers.cookie);
+    
+    if (req.session && req.session.authenticated) {
+        console.log(`[AUTH] ✅ Authentication successful for ${req.url}`);
         next();
     } else {
-        console.log('Authentication failed, redirecting to login');
+        console.log(`[AUTH] ❌ Authentication failed for ${req.url}`);
         // For API calls, return JSON instead of redirect
         if (req.url.startsWith('/api/')) {
+            console.log(`[AUTH] Returning 401 JSON for API call`);
             return res.status(401).json({ error: 'Authentication required' });
         }
+        console.log(`[AUTH] Redirecting to login page`);
         res.redirect('/login');
     }
 };
@@ -138,14 +155,30 @@ app.get('/login', (req, res) => {
 
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
-    console.log('Login attempt:', username);
+    console.log(`[LOGIN] ${new Date().toISOString()} - Login attempt for username: "${username}"`);
+    console.log(`[LOGIN] Expected username: "${LOGIN_USERNAME}"`);
+    console.log(`[LOGIN] Expected password: "${LOGIN_PASSWORD}"`);
+    console.log(`[LOGIN] Username match: ${username === LOGIN_USERNAME}`);
+    console.log(`[LOGIN] Password match: ${password === LOGIN_PASSWORD}`);
+    console.log(`[LOGIN] Session ID: ${req.sessionID}`);
+    console.log(`[LOGIN] Session before auth:`, JSON.stringify(req.session, null, 2));
     
     if (username === LOGIN_USERNAME && password === LOGIN_PASSWORD) {
         req.session.authenticated = true;
-        console.log('Login successful, session set');
-        res.json({ success: true });
+        console.log(`[LOGIN] ✅ Login successful - setting session.authenticated = true`);
+        console.log(`[LOGIN] Session after auth:`, JSON.stringify(req.session, null, 2));
+        
+        // Save session explicitly
+        req.session.save((err) => {
+            if (err) {
+                console.error(`[LOGIN] ❌ Session save error:`, err);
+                return res.status(500).json({ success: false, error: 'Session save failed' });
+            }
+            console.log(`[LOGIN] ✅ Session saved successfully`);
+            res.json({ success: true });
+        });
     } else {
-        console.log('Login failed - invalid credentials');
+        console.log(`[LOGIN] ❌ Login failed - invalid credentials`);
         res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 });
