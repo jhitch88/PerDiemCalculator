@@ -128,7 +128,9 @@
         document.addEventListener('DOMContentLoaded', async function() {
             // Check authentication status
             try {
-                const authCheck = await fetch('/api/auth-check');
+                const authCheck = await fetch('/api/auth-check', {
+                    credentials: 'include'
+                });
                 if (!authCheck.ok) {
                     window.location.href = '/login';
                     return;
@@ -165,7 +167,9 @@
 
         async function searchCities(query, state) {
             try {
-                const response = await fetch(`/api/search-cities?query=${encodeURIComponent(query)}&state=${encodeURIComponent(state)}`);
+                const response = await fetch(`/api/search-cities?query=${encodeURIComponent(query)}&state=${encodeURIComponent(state)}`, {
+                    credentials: 'include'
+                });
                 
                 // Check if response is actually JSON
                 const contentType = response.headers.get('content-type');
@@ -270,7 +274,8 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(requestBody)
+                    body: JSON.stringify(requestBody),
+                    credentials: 'include'
                 });
                 
                 // Check if response is actually JSON
@@ -515,7 +520,10 @@
 
         async function logout() {
             try {
-                await fetch('/logout', { method: 'POST' });
+                await fetch('/logout', { 
+                    method: 'POST',
+                    credentials: 'include' 
+                });
                 window.location.href = '/login';
             } catch (error) {
                 console.error('Logout error:', error);

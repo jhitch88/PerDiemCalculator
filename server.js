@@ -103,12 +103,12 @@ app.use(express.static('public'));
 const sessionConfig = {
     secret: SESSION_SECRET,
     resave: false,
-    saveUninitialized: false,
+    saveUninitialized: true, // Changed to true for better compatibility
     cookie: { 
-        secure: NODE_ENV === 'production', // HTTPS only in production
+        secure: false, // Temporarily disable for debugging - App Runner should handle HTTPS termination
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
         httpOnly: true,
-        sameSite: NODE_ENV === 'production' ? 'strict' : 'lax'
+        sameSite: 'lax' // More permissive for App Runner
     }
 };
 
