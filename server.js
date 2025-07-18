@@ -3,6 +3,7 @@ const session = require('express-session');
 const axios = require('axios');
 const path = require('path');
 const crypto = require('crypto');
+const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 
 // Load environment variables from .env file in development
 if (process.env.NODE_ENV !== 'production') {
@@ -11,29 +12,87 @@ if (process.env.NODE_ENV !== 'production') {
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-
-// Environment Variables Configuration
-const GSA_API_KEY = process.env.GSA_API_KEY;
-const LOGIN_USERNAME = process.env.LOGIN_USERNAME;
-const LOGIN_PASSWORD = process.env.LOGIN_PASSWORD;
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex');
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // GSA API Configuration
 const GSA_BASE_URL = 'https://api.gsa.gov/travel/perdiem/v2';
 
-// Validate required environment variables
-if (!GSA_API_KEY) {
-    console.error('ERROR: GSA_API_KEY environment variable is required');
-    process.exit(1);
+// Global variables for secrets (will be loaded from AWS Secrets Manager in production)
+let GSA_API_KEY, LOGIN_USERNAME, LOGIN_PASSWORD, SESSION_SECRET;
+
+// Function to get secrets from AWS Secrets Manager
+async function getSecrets() {
+    if (NODE_ENV !== 'production') {
+        // In development, use environment variables
+        GSA_API_KEY = process.env.GSA_API_KEY;
+        LOGIN_USERNAME = process.env.LOGIN_USERNAME;
+        LOGIN_PASSWORD = process.env.LOGIN_PASSWORD;
+        SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex');
+        console.log('Using environment variables for development');
+        return;
+    }
+
+    try {
+        console.log('Loading secrets from AWS Secrets Manager...');
+        const secret_name = "PerDiemSecrets";
+        
+        const client = new SecretsManagerClient({
+            region: "us-east-1",
+        });
+        
+        const response = await client.send(
+            new GetSecretValueCommand({
+                SecretId: secret_name,
+                VersionStage: "AWSCURRENT", // VersionStage defaults to AWSCURRENT if unspecified
+            })
+        );
+        
+        const secrets = JSON.parse(response.SecretString);
+        
+        GSA_API_KEY = secrets.GSA_API_KEY;
+        LOGIN_USERNAME = secrets.LOGIN_USERNAME;
+        LOGIN_PASSWORD = secrets.LOGIN_PASSWORD;
+        SESSION_SECRET = secrets.SESSION_SECRET;
+        
+        console.log('✅ Secrets loaded successfully from AWS Secrets Manager');
+        console.log(`✅ GSA_API_KEY loaded: ${GSA_API_KEY ? 'Yes' : 'No'}`);
+        console.log(`✅ LOGIN_USERNAME loaded: ${LOGIN_USERNAME ? 'Yes' : 'No'}`);
+        console.log(`✅ LOGIN_PASSWORD loaded: ${LOGIN_PASSWORD ? 'Yes' : 'No'}`);
+        console.log(`✅ SESSION_SECRET loaded: ${SESSION_SECRET ? 'Yes' : 'No'}`);
+        
+    } catch (error) {
+        console.error('❌ Error loading secrets from AWS Secrets Manager:', error.message);
+        console.error('❌ Error details:', error);
+        
+        // Fallback to environment variables
+        console.log('⚠️ Falling back to environment variables...');
+        GSA_API_KEY = process.env.GSA_API_KEY;
+        LOGIN_USERNAME = process.env.LOGIN_USERNAME;
+        LOGIN_PASSWORD = process.env.LOGIN_PASSWORD;
+        SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex');
+        
+        if (!GSA_API_KEY) {
+            console.error('❌ CRITICAL: No GSA_API_KEY found in Secrets Manager or environment variables');
+        }
+    }
 }
 
-if (!LOGIN_USERNAME || !LOGIN_PASSWORD) {
-    console.error('ERROR: LOGIN_USERNAME and LOGIN_PASSWORD environment variables are required');
-    process.exit(1);
-}
+// Initialize and start server
+async function startServer() {
+    await getSecrets();
+    
+    // Validate required secrets
+    if (!GSA_API_KEY) {
+        console.error('ERROR: GSA_API_KEY is required');
+        process.exit(1);
+    }
 
-console.log(`Starting Per Diem Calculator in ${NODE_ENV} mode`);
+    if (!LOGIN_USERNAME || !LOGIN_PASSWORD) {
+        console.error('ERROR: LOGIN_USERNAME and LOGIN_PASSWORD are required');
+        process.exit(1);
+    }
+
+    console.log(`Starting Per Diem Calculator in ${NODE_ENV} mode`);
 
 // Middleware
 app.use(express.json());
@@ -503,7 +562,15 @@ app.get('/api/search-cities', requireAuth, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Per Diem Calculator running on port ${PORT}`);
-    console.log(`Open http://localhost:${PORT} in your browser`);
+    // Start the server
+    app.listen(PORT, () => {
+        console.log(`Per Diem Calculator running on port ${PORT}`);
+        console.log(`Open http://localhost:${PORT} in your browser`);
+    });
+}
+
+// Start the application
+startServer().catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
 });

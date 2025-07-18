@@ -15,3 +15,5 @@ run:
   env:
     - name: NODE_ENV
       value: production
+    - name: AWS_REGION
+      value: us-east-1
