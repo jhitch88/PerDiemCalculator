@@ -66,7 +66,7 @@ This application uses the official GSA Per Diem API:
 - **Frontend**: Vanilla JavaScript with modern ES6+ features
 - **Storage**: Local browser storage for data persistence
 - **Authentication**: Express sessions
-- **Node Version**: 18+ (AWS compatible)
+- **Node Version**: 22+ (AWS compatible)
 
 ## Security
 
@@ -83,7 +83,7 @@ This application uses the official GSA Per Diem API:
    - Choose "Source code repository"
 
 2. **Configure Build:**
-   - Runtime: Node.js 18
+   - Runtime: Node.js 22
    - Build command: `npm ci --only=production`
    - Start command: `node server.js`
    - Port: 3002

@@ -265,3 +265,20 @@
         .suggestion-item:last-child {
             border-bottom: none;
         }
+
+        .footer {
+            margin-top: 2rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+
+        .disclaimer {
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin: 0;
+            line-height: 1.4;
+            max-width: 800px;
+            margin: 0 auto;
+        }

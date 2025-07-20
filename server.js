@@ -156,8 +156,8 @@ app.get('/login', (req, res) => {
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
     console.log(`[LOGIN] ${new Date().toISOString()} - Login attempt for username: "${username}"`);
-    console.log(`[LOGIN] Expected username: "${LOGIN_USERNAME}"`);
-    console.log(`[LOGIN] Expected password: "${LOGIN_PASSWORD}"`);
+    // console.log(`[LOGIN] Expected username: "${LOGIN_USERNAME}"`);
+    // console.log(`[LOGIN] Expected password: "${LOGIN_PASSWORD}"`);
     console.log(`[LOGIN] Username match: ${username === LOGIN_USERNAME}`);
     console.log(`[LOGIN] Password match: ${password === LOGIN_PASSWORD}`);
     console.log(`[LOGIN] Session ID: ${req.sessionID}`);
